@@ -1,6 +1,6 @@
 import json
 import time
- 
+from guardrails import output_guardrail
 class TrajectoryLogger:
     """Логування траєкторії виконання агента."""
     _instance = None
@@ -15,12 +15,16 @@ class TrajectoryLogger:
     def log_step(self, agent_name: str, step_num: int, node: str,
                  input_data: str, output_data: str,
                  tool_calls: list = None):
+        
+        safe_input, _ = output_guardrail(str(input_data))
+        safe_output, _ = output_guardrail(str(input_data))
+        
         self.steps.append({
             'agent_name': agent_name,
             'step': step_num,
             'node': node,
-            'input': str(input_data),
-            'output': str(output_data),
+            'input': safe_input,
+            'output': safe_output,
             'tool_calls': tool_calls or [],
         })
  

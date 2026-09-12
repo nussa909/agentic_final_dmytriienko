@@ -386,19 +386,12 @@ async def knowledge_search(query: str) -> str:
         logging.info("Ініціалізація ChromaDB / OpenAIEmbeddings...")
         retriever = get_retriever()
         
-        #logging.info("Виклик retriever.ainvoke()...")
-
-        #docs = await retriever.ainvoke(clean_query) 
-        
-        # Витягуємо саму векторну базу з обгортки retriever
         v_store = retriever.vectorstore
         
         logging.info("Отримуємо вектор запиту асинхронно...")
-        # 1. Асинхронний запит до OpenRouter (не блокує систему)
         query_vector = await v_store.embeddings.aembed_query(clean_query)
         
         logging.info("Локальний пошук у ChromaDB...")
-        # 2. Синхронний пошук по вектору (уникає конфлікту SQLite)
         docs = v_store.similarity_search_by_vector(query_vector, k=3)
 
         

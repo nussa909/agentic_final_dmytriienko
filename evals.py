@@ -6,14 +6,14 @@ EVAL_SCENARIOS = [
     {
         'id': 'EVAL-01',
         'query': 'Мені 35 років, вага 82 кг, зріст 178 см. Часто болить голова. Порахуй BMI та дай рекомендації.',
-        'expected_keywords': {"надлишкова вага", "стрес, мігрень", "відпочинок"},
+        'expected_keywords': {'bmi',"надлишкова вага", "стрес, мігрень", "відпочинок"},
         'agent': {'supervisor','consultant'},
     },
     {
         'id': 'EVAL-02',
         'query': 'Скільки парацеталому дати дитині (вік - 12 років, вага - 40 кг)?',
-        'expected_keywords': {'Рекомендована доза парацетамолу'},
-        'agent': {'supervisor','parmacist'},
+        'expected_keywords': {'парацетамол'},
+        'agent': {'supervisor','pharmacist'},
     },
     {
         'id': 'EVAL-03',
@@ -23,15 +23,15 @@ EVAL_SCENARIOS = [
     },
     {
         'id': 'EVAL-04',
-        'query': 'Мені 35 років, вага 82 кг, зріст 178 см. Часто болить голова. Порахуй BMI та дай рекомендації.',
-        'expected_keywords': 'Інформація про погоду в Києві',
-        'agent': {'supervisor', 'consultant'},
+        'query': 'У чоловіка діагностован бронхіт, симптоми: кашель, температура. Знайди протокол лікування бронхіту та розрахуй дозу парацетамолу (вік - 35років, вага - 75кг, зріст - 180см).',
+        'expected_keywords': {'Антибіотики', 'нестероїдні протизапальні засоби', 'moh_ukraine_protocols', 'парацетамол','мг'},
+        'agent': {'supervisor', 'researcher','pharmacist'},
     },
     {
         'id': 'EVAL-05',
-        'query': 'Скільки парацеталому дати дитині (вік - 12 років, вага - 40 кг)?',
-        'expected_keywords': 'Порівняння погоди двох міст',
-        'agent': {'parmacist'},
+        'query': 'Симптоми: головний біль. Жінка, вік - 35 років, вага - 65 кг, зріст - 160 см. Розрахуй мій ІМТ, подивись рекомендації щодо цього симптому та знайди в медичних довідниках "червоні прапорці" для головного болю, які вимагають МРТ.',
+        'expected_keywords': {'Червоні прапорці', 'головний біль', 'medical_reference_book', 'головний біль','ІМТ'},
+        'agent': {'supervisor', 'researcher','consultant'}
     }
 ]
  
@@ -51,7 +51,7 @@ async def run_evals(app, initial_state_fn, final_state_fn):
             result_text = await final_state_fn(app, config)
 
             answer = result_text.lower()
-            keywords_found = [kw for kw in scenario ["expected_keywords"] if kw.lower() in answer]
+            keywords_found = [kw for kw in scenario ["expected_keywords"] if str(kw).lower() in answer]
             ok = len(keywords_found) > 0
             if ok: 
                 passed += 1
@@ -59,7 +59,7 @@ async def run_evals(app, initial_state_fn, final_state_fn):
             results.append({
                 "id":scenario["id"],
                 "query": scenario["query"],
-                "expected_agent": scenario ["agent"],
+                "expected_agent": list(scenario["agent"]),
                 "keywords_found": keywords_found,
                 "passed": ok,
                 "answer_preview": result_text

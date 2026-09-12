@@ -2,7 +2,7 @@ import os
 import operator
 from typing import Annotated, Literal, TypedDict
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
@@ -31,7 +31,6 @@ def build_researcher_graph(tools: list):
         base_url="https://openrouter.ai/api/v1"
     )
 
-    # Біндимо інструменти до LLM
     llm_with_tools = llm.bind_tools(tools) if tools else llm
     
     # ── Вузли ──
@@ -44,9 +43,33 @@ def build_researcher_graph(tools: list):
             "2. Структуруй знайдену інформацію.\n"
             "3. Вказуй джерела (source), якщо вони є у JSON-відповіді.\n"
             "4. Не роби власних висновків щодо лікування."
+            "5. Якщо запит містить завдання поза твоєю компетенцією (наприклад, розрахунок дози), НЕ пиши, що ти цього не можеш зробити. Просто надай знайдену інформацію. Інші агенти зроблять решту."
         ))
         
-        messages_for_llm = [sys_msg] + state["messages"]
+        messages = state["messages"]
+        
+        clean_messages = []
+        
+        human_msgs = [m for m in messages if m.type == "human"]
+        if human_msgs:
+            clean_messages.append(human_msgs[0])
+            
+        ai_texts = [m.content for m in messages if m.type == "ai" and m.content and not getattr(m, "tool_calls", None)]
+        if ai_texts:
+            context_msg = HumanMessage(content=f"[Інформація від попереднього експерта]: {ai_texts[-1]}\n\nТепер виконай свою частину завдання (knowledge_search).")
+            clean_messages.append(context_msg)
+            
+        for msg in messages:
+            if msg.type == "ai" and getattr(msg, "tool_calls", None):
+                if any(tc.get("name") == "knowledge_search" for tc in msg.tool_calls):
+                    clean_messages.append(msg)
+            elif msg.type == "tool" and getattr(msg, "name", "") == "knowledge_search":
+                clean_messages.append(msg)
+                    
+            elif msg.type == "tool" and msg.name == "knowledge_search":
+                clean_messages.append(msg)  
+                
+        messages_for_llm = [sys_msg] + clean_messages
         response = await llm_with_tools.ainvoke(messages_for_llm)
         
         print(f"\n[{PREFIX}] Пошук інформації. Викликані інструменти: {[tc['name'] for tc in getattr(response, 'tool_calls', [])]}")
@@ -81,7 +104,7 @@ def build_researcher_graph(tools: list):
 
                 return res
             except Exception as e:
-                print(f"[DEBUG Tools] ❌ Помилка в інструменті: {e}")
+                print(f"[DEBUG Tools] Помилка в інструменті: {e}")
                 raise e
             
     # ── Роутер ──

@@ -43,7 +43,7 @@ def build_pharmacist_graph(tools: list):
 
     # Біндимо ризиковані інструменти
     print(f"[{PREFIX}] tools:", [tool.name for tool in tools])
-    llm_with_tools = llm.bind_tools(tools)
+    #llm_with_tools = llm.bind_tools(tools, tool_choice="required")
 
     # ── Вузли ──
     def pharmacist_agent_node(state: PharmacistState) -> dict:
@@ -55,10 +55,32 @@ def build_pharmacist_graph(tools: list):
             "Якщо користувач вказав назву препарату, вагу та вік (навіть якщо вони вказані у дужках) — просто використай інструмент.\n"
             "Не пиши жодного коду чи пояснень. Якщо ваги або віку не вистачає, чемно попроси користувача їх уточнити."
             "Коли інструмент повернув результат (чорновик, затверджений лікарем), ти ОБОВ'ЯЗКОВО маєш написати фінальну, ввічливу текстову відповідь для пацієнта, озвучивши цю затверджену дозу."
+            "СУВОРЕ ПРАВИЛО: НЕ відмовляй у розрахунку через застереження щодо самолікування, оскільки система має Human-in-the-Loop, і ВСІ твої розрахунки обов'язково перевіряє та затверджує живий лікар-експерт."
         ))
+        messages = state['messages']
+        
+        clean_messages = []
+        for msg in messages:
+            if msg.type == "human":
+                clean_messages.append(msg)
+            
+            elif msg.type == "ai" and msg.content and not getattr(msg, "tool_calls", None):
+                clean_messages.append(msg)
+                
+            elif msg.type == "ai" and getattr(msg, "tool_calls", None):
+                # Пропускаємо, тільки якщо модель викликала 'knowledge_search'
+                if any(tc.get("name") == "dosage_recommendation" for tc in msg.tool_calls):
+                    clean_messages.append(msg)
+                    
+            elif msg.type == "tool" and msg.name == "dosage_recommendation":
+                clean_messages.append(msg)
 
-        # Передаємо LLM системний промпт та історію повідомлень
-        messages_for_llm = [sys_msg] + state["messages"]
+        if messages and messages[-1].type == "tool":
+            llm_with_tools = llm.bind_tools(tools)
+        else:
+            llm_with_tools = llm.bind_tools(tools, tool_choice="dosage_recommendation")
+
+        messages_for_llm = [sys_msg] + clean_messages
         response = llm_with_tools.invoke(messages_for_llm)
 
         tool_calls = []
@@ -82,7 +104,6 @@ def build_pharmacist_graph(tools: list):
 
         return {"messages": [response]}
 
-    # Вузол виконання інструментів (MCP)
     tools_node = ToolNode(tools)
     memory = MemorySaver()
 
@@ -103,82 +124,81 @@ def build_pharmacist_graph(tools: list):
 
     workflow.add_edge(START, "agent")
     workflow.add_conditional_edges("agent", route_pharmacist)
-    # Після виконання інструменту завжди повертаємось до агента, щоб він прочитав результат
+
     workflow.add_edge("tools", "agent")
 
-    # КОМПІЛЯЦІЯ З HITL: Заморожуємо виконання ПЕРЕД викликом інструменту
     return workflow.compile(checkpointer=memory, interrupt_after=["tools"])
 
 
-async def main():
-    client = MedicalMCPClient()
-    print("Підключено до MCP сервера...")
+# async def main():
+#     client = MedicalMCPClient()
+#     print("Підключено до MCP сервера...")
 
-    # Отримуємо тули
-    safe_tools, risky_tools, rag_tools = await client.get_categorized_tools()
+#     # Отримуємо тули
+#     safe_tools, risky_tools, rag_tools = await client.get_categorized_tools()
 
-    # Будуємо ТІЛЬКИ графа Фармацевта
-    pharmacist_app = build_pharmacist_graph(risky_tools)
+#     # Будуємо ТІЛЬКИ графа Фармацевта
+#     pharmacist_app = build_pharmacist_graph(risky_tools)
 
-    config = {'configurable': {'thread_id': 'pharmacist-direct-test-01'}}
+#     config = {'configurable': {'thread_id': 'pharmacist-direct-test-01'}}
 
-    # Чіткий запит з усіма даними
-    query = "Скільки парацетамолу дати дитині (12 років, 40 кг)?"
+#     # Чіткий запит з усіма даними
+#     query = "Скільки парацетамолу дати дитині (12 років, 40 кг)?"
 
-    print("\n--- ЗАПУСК ФАРМАЦЕВТА НАПРЯМУ ---")
-    await pharmacist_app.ainvoke({"messages": [HumanMessage(content=query)]}, config)
+#     print("\n--- ЗАПУСК ФАРМАЦЕВТА НАПРЯМУ ---")
+#     await pharmacist_app.ainvoke({"messages": [HumanMessage(content=query)]}, config)
 
-    # Отримуємо стан після зупинки
-    state = await pharmacist_app.aget_state(config)
+#     # Отримуємо стан після зупинки
+#     state = await pharmacist_app.aget_state(config)
 
-    print("\n=== РЕЗУЛЬТАТИ ===")
-    if state.next:
-        last_msg = state.values['messages'][-1]
+#     print("\n=== РЕЗУЛЬТАТИ ===")
+#     if state.next:
+#         last_msg = state.values['messages'][-1]
 
-        if isinstance(last_msg, ToolMessage):
-            print("\n" + "="*50)
-            print("ПОТРІБНА УЧАСТЬ ЛІКАРЯ (HITL)")
-            print("="*50)
+#         if isinstance(last_msg, ToolMessage):
+#             print("\n" + "="*50)
+#             print("ПОТРІБНА УЧАСТЬ ЛІКАРЯ (HITL)")
+#             print("="*50)
 
-            # Виводимо чорновик від інструмента
-            # (MCP іноді повертає контент у вигляді списку словників)
-            content = last_msg.content
-            if isinstance(content, list):
-                content = content[0].get('text', str(content))
-            print(content)
+#             # Виводимо чорновик від інструмента
+#             # (MCP іноді повертає контент у вигляді списку словників)
+#             content = last_msg.content
+#             if isinstance(content, list):
+#                 content = content[0].get('text', str(content))
+#             print(content)
 
-            print("="*50)
-            action = input(
-                "\nВведіть 'y' для підтвердження або напишіть своє дозування: ")
+#             print("="*50)
+#             action = input(
+#                 "\nВведіть 'y' для підтвердження або напишіть своє дозування: ")
 
-            if action.strip().lower() not in ['y', 'yes', 'т', 'так']:
-                # Створюємо нове повідомлення від інструменту,
-                # використовуючи ТОЙ САМИЙ ID, але з новим текстом лікаря
-                updated_tool_message = ToolMessage(
-                    content=f"ЗАТВЕРДЖЕНО ЛІКАРЕМ (Виправлено ручками): {action}",
-                    tool_call_id=last_msg.tool_call_id
-                )
+#             if action.strip().lower() not in ['y', 'yes', 'т', 'так']:
+#                 # Створюємо нове повідомлення від інструменту,
+#                 # використовуючи ТОЙ САМИЙ ID, але з новим текстом лікаря
+#                 updated_tool_message = ToolMessage(
+#                     content=f"ЗАТВЕРДЖЕНО ЛІКАРЕМ (Виправлено ручками): {action}",
+#                     tool_call_id=last_msg.tool_call_id
+#                 )
 
-                # Перезаписуємо результат інструменту в пам'яті графа!
-                await pharmacist_app.aupdate_state(
-                    config,
-                    {"messages": [updated_tool_message]},
-                    as_node="tools"  # Вказуємо, що ми оновлюємо вузол інструментів
-                )
-                print("Дозування змінено і примусово збережено в систему.")
-            else:
-                print("Дозування підтверджено без змін.")
+#                 # Перезаписуємо результат інструменту в пам'яті графа!
+#                 await pharmacist_app.aupdate_state(
+#                     config,
+#                     {"messages": [updated_tool_message]},
+#                     as_node="tools"  # Вказуємо, що ми оновлюємо вузол інструментів
+#                 )
+#                 print("Дозування змінено і примусово збережено в систему.")
+#             else:
+#                 print("Дозування підтверджено без змін.")
 
-            # Знімаємо граф з паузи і даємо йому допрацювати
-            print("\nПродовження роботи системи...")
-            await pharmacist_app.ainvoke(None, config)
+#             # Знімаємо граф з паузи і даємо йому допрацювати
+#             print("\nПродовження роботи системи...")
+#             await pharmacist_app.ainvoke(None, config)
 
-            # Дивимося фінальну відповідь агента
-            final_state = await pharmacist_app.aget_state(config)
-            final_msg = final_state.values['messages'][-1]
-            print("\n=== ФІНАЛЬНА ВІДПОВІДЬ ПАЦІЄНТУ ===")
-            print(final_msg.content)
+#             # Дивимося фінальну відповідь агента
+#             final_state = await pharmacist_app.aget_state(config)
+#             final_msg = final_state.values['messages'][-1]
+#             print("\n=== ФІНАЛЬНА ВІДПОВІДЬ ПАЦІЄНТУ ===")
+#             print(final_msg.content)
 
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+# if __name__ == "__main__":
+#     import asyncio
+#     asyncio.run(main())

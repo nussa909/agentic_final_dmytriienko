@@ -4,27 +4,21 @@ from mcp_server import mcp
 
 async def call_tool(name: str, args: dict) -> str:
     """Хелпер: виклик MCP-tool у тестах."""
-    # mcp.call_tool повертає список блоків (наприклад, TextContent)
+
     result = await mcp.call_tool(name, args)
 
-    # 1. Якщо тул повертає чистий рядок (наприклад, помилку валідації)
     if isinstance(result, str):
         return result
         
-    # 2. Якщо результат має атрибут content (стандартний CallToolResult)
     if hasattr(result, 'content') and isinstance(result.content, list) and len(result.content) > 0:
         return result.content[0].text
         
-    # 3. Якщо результат є списком
     if isinstance(result, list) and len(result) > 0:
         item = result[0]
-        # Якщо всередині об'єкт з text
         if hasattr(item, 'text'):
             return item.text
-        # Якщо всередині словник
         elif isinstance(item, dict):
             return item.get('text', str(item))
-        # Якщо всередині знову список (як у вашій помилці)
         elif isinstance(item, list) and len(item) > 0:
             sub_item = item[0]
             if hasattr(sub_item, 'text'):
@@ -32,7 +26,6 @@ async def call_tool(name: str, args: dict) -> str:
             elif isinstance(sub_item, dict):
                 return sub_item.get('text', str(sub_item))
                 
-    # Фоллбек: просто перетворюємо результат на рядок, щоб json.loads або assert '...' in res не впали
     return str(result)
 
 async def main():
